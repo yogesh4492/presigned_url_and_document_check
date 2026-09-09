@@ -11,7 +11,7 @@ A full-stack, enterprise-grade clinical data processing and AWS S3 presigned URL
 1. **Clinical SOAP Notes Review Pipeline**: Automated HIPAA redaction tag extraction, entity detection, redacted tag frequency counters, side-by-side inspection, and dual-tier formatted Excel reports.
 2. **Any-File S3 Uploader**: Universal upload for any file types (PDF, images, audio, documents, data, zips) with automated **7-day validity inline-onclick openable** presigned URL Excel and CSV reports.
 3. **Scenario 1 — `s3path` CSV Bulk Presigner**: Ingest any CSV containing an `s3path` column to enrich and output all original data with active 7-day inline URLs.
-4. **Scenario 2 — S3 Bucket & Prefix Auto-Detector**: Automatically scan any S3 bucket and prefix (e.g. `s3://int-shaip-bucket/interns-test-data/SEP8/`) to discover all files and generate 7-day validity inline openable URLs with one-click Excel/CSV exports.
+4. **Scenario 2 — S3 Bucket & Prefix Auto-Detector**: Automatically scan any S3 bucket and prefix (e.g. `s3://bucket-name/prefix/`) to discover all files and generate 7-day validity inline openable URLs with one-click Excel/CSV exports.
 
 ---
 
@@ -65,7 +65,7 @@ A full-stack, enterprise-grade clinical data processing and AWS S3 presigned URL
                                      │ AWS S3 API Calls
 ┌────────────────────────────────────▼────────────────────────────────────┐
 │                       Amazon Simple Storage Service                     │
-│   - Bucket: int-shaip-bucket (or user-configured target bucket)          │
+│   - Bucket: bucket (or user-configured target bucket)          │
 │   - Presigned URLs: 7-Day Validity (604,800s)                           │
 │   - ResponseContentDisposition: inline; filename="..."                  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,7 @@ A full-stack, enterprise-grade clinical data processing and AWS S3 presigned URL
 - **Workflow**:
   1. Navigate to **Any-File S3 Uploader** > Sub-tab **3. Upload Local Files**.
   2. Drag and drop any files or select a folder.
-  3. Expand the **S3 Destination** drawer to customize the bucket name (defaults to `int-shaip-bucket`), folder prefix, and validity duration (defaults to 7 days).
+  3. Expand the **S3 Destination** drawer to customize the bucket name (defaults to `bucket-name`), folder prefix, and validity duration (defaults to 7 days).
   4. Click **Upload to AWS S3 & Generate Presigned Reports**.
   5. The server streams files concurrently to S3 and signs them with `ResponseContentDisposition: inline`.
   6. Download the generated **Excel (.xlsx)** or **CSV (.csv)** reports, or click **Open Inline** to view any uploaded asset directly in a new browser tab without forcing a file download.
@@ -130,11 +130,11 @@ A full-stack, enterprise-grade clinical data processing and AWS S3 presigned URL
 ---
 
 ### Use Case 5: Scenario 2 — Bucket & Prefix Auto-Detector
-- **Goal**: Automatically scan an existing S3 bucket directory (e.g. `s3://int-shaip-bucket/interns-test-data/SEP8/`) without needing an inventory CSV, discover every file, and generate 7-day validity inline URLs for team sharing.
+- **Goal**: Automatically scan an existing S3 bucket directory (e.g. `s3_path`) without needing an inventory CSV, discover every file, and generate 7-day validity inline URLs for team sharing.
 - **Workflow**:
   1. Open **Any-File S3 Uploader** > Sub-tab **2. Auto-Detect S3 Files**.
-  2. Enter the **S3 Bucket Name** (e.g. `int-shaip-bucket`).
-  3. Enter the **Prefix / Folder Path** (e.g. `interns-test-data/SEP8/` or leave empty for root).
+  2. Enter the **S3 Bucket Name** (e.g. `bucket-name`).
+  3. Enter the **Prefix / Folder Path** (e.g. `test/` or leave empty for root).
   4. Select scan limit (up to 5,000 files).
   5. Click **Auto-Detect & Generate 7-Day URLs**.
   6. The server invokes S3 `ListObjectsV2`, filters out folder markers, and generates inline presigned URLs for each asset.
@@ -151,7 +151,7 @@ Follow these steps to clone, configure, and run the application on your local wo
 - **Node.js**: Version `20.x` or higher (verify via `node -v`)
 - **npm**: Version `10.x` or higher (verify via `npm -v`)
 - **Git**: Installed and configured (verify via `git --version`)
-- **AWS Credentials**: (Optional) IAM user credentials with S3 read/write permissions for `int-shaip-bucket`.
+- **AWS Credentials**: (Optional) IAM user credentials with S3 read/write permissions for `bucketname`.
 
 ---
 
@@ -188,8 +188,8 @@ AWS_REGION="us-east-1"
 AWS_ACCESS_KEY_ID="AKIA..."
 AWS_SECRET_ACCESS_KEY="wJalrXUtn..."
 AWS_SESSION_TOKEN=""
-S3_BUCKET_NAME="int-shaip-bucket"
-S3_DEFAULT_PREFIX="interns-test-data/SEP8/"
+S3_BUCKET_NAME="bucket"
+S3_DEFAULT_PREFIX="SEP8/"
 
 # AI Studio / Gemini API Key (if using AI features)
 GEMINI_API_KEY=""
@@ -246,7 +246,7 @@ npm run build && npm start
 If running via Docker, you can map port `8000` on your host machine to container port `3000`:
 ```bash
 docker run -d -p 8000:3000 \
-  -e S3_BUCKET_NAME="int-shaip-bucket" \
+  -e S3_BUCKET_NAME="bucket" \
   --name clinical-app clinical-s3-pipeline
 ```
 
@@ -344,7 +344,7 @@ The application is pre-configured for containerized deployment on Cloud Run:
      --region us-central1 \
      --allow-unauthenticated \
      --port 3000 \
-     --set-env-vars="S3_BUCKET_NAME=int-shaip-bucket,AWS_REGION=us-east-1"
+     --set-env-vars="S3_BUCKET_NAME=bucket,AWS_REGION=us-east-1"
    ```
 
 ---
@@ -373,7 +373,7 @@ CMD ["node", "dist/server.cjs"]
 Build and run:
 ```bash
 docker build -t clinical-s3-pipeline .
-docker run -p 3000:3000 -e S3_BUCKET_NAME="int-shaip-bucket" clinical-s3-pipeline
+docker run -p 3000:3000 -e S3_BUCKET_NAME="bucket" clinical-s3-pipeline
 ```
 
 ---
@@ -381,7 +381,7 @@ docker run -p 3000:3000 -e S3_BUCKET_NAME="int-shaip-bucket" clinical-s3-pipelin
 ### Option C: AWS App Runner or EC2
 1. Deploy the Docker image to Amazon ECR.
 2. Launch an AWS App Runner service pointing to your ECR image.
-3. Attach an IAM Instance Profile or Task Role with S3 read/write access to `int-shaip-bucket` — no hardcoded AWS credentials required!
+3. Attach an IAM Instance Profile or Task Role with S3 read/write access 'bucket` — no hardcoded AWS credentials required!
 
 ---
 
@@ -390,7 +390,7 @@ docker run -p 3000:3000 -e S3_BUCKET_NAME="int-shaip-bucket" clinical-s3-pipelin
 ### 1. S3 Bucket CORS Configuration (Mandatory for Browser Inline Open)
 To enable browser tabs to display files (PDF, images, text) directly instead of throwing cross-origin download errors, configure CORS on your S3 bucket:
 
-1. Go to AWS S3 Console > Select `int-shaip-bucket` > **Permissions** tab.
+1. Go to AWS S3 Console > Select `bucket` > **Permissions** tab.
 2. Scroll to **Cross-origin resource sharing (CORS)** and paste:
 
 ```json
@@ -437,8 +437,8 @@ Attach this least-privilege policy to your IAM user or role:
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::int-shaip-bucket",
-        "arn:aws:s3:::int-shaip-bucket/*"
+        "arn:aws:s3:::bucket",
+        "arn:aws:s3:::bucket/*"
       ]
     }
   ]
@@ -473,7 +473,7 @@ Attach this least-privilege policy to your IAM user or role:
 **Fix**: This is an intentional feature requested by users (`ResponseContentDisposition: inline; filename="..."`). If you need to force a download instead, right-click the link and choose "Save Link As...", or open the downloaded Excel workbook and click the hyperlink.
 
 #### Q: How can I change the default S3 bucket?
-**Fix**: The default bucket is `int-shaip-bucket`. You can change it anytime in the application UI input field, or override it in your `.env` file with `S3_BUCKET_NAME=your-bucket-name`.
+**Fix**: The default bucket is `bucket`. You can change it anytime in the application UI input field, or override it in your `.env` file with `S3_BUCKET_NAME=your-bucket-name`.
 
 ---
 
