@@ -1,6 +1,6 @@
 {
   "name": "De-ID Clinical Notes Pipeline & Review Generator",
-  "description": "Process de-identified clinical SOAP notes, analyze redaction tags and entity mappings, synchronize with AWS S3, upload arbitrary files, and generate inline-openable presigned URL Excel and CSV reports.",
+  "description": "Process de-identified clinical SOAP notes with redacted tag analytics, generate 7-day presigned URLs from s3path CSVs, auto-detect files in S3 buckets and prefixes, and export inline-openable Excel and CSV reports.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

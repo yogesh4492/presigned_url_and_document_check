@@ -13,12 +13,20 @@ import {
   uploadFilesToS3,
   uploadWorkbookToS3,
   uploadAnyFilesToS3,
+  presignS3PathList,
+  listAndPresignBucketObjects,
   GenericFileInput,
   GenericUploadedItem,
+  S3PathPresignItem,
+  S3DetectedObjectItem,
 } from './server/s3Service';
 import {
   generatePresignedUrlsExcel,
   generatePresignedUrlsCsv,
+  generateS3PathCsvExcelReport,
+  generateS3PathCsvTextReport,
+  generateDetectedObjectsExcel,
+  generateDetectedObjectsCsv,
   PresignedFileReportItem,
 } from './src/services/genericPresignedReportGenerator';
 
@@ -46,6 +54,19 @@ let latestS3UploadStats: any = null;
 let latestGenericExcelBuffer: Uint8Array | null = null;
 let latestGenericCsvContent: string | null = null;
 let latestGenericReportItems: PresignedFileReportItem[] = [];
+
+// In-memory cache for s3path CSV presign reports
+let latestCsvPresignExcelBuffer: Uint8Array | null = null;
+let latestCsvPresignCsvContent: string | null = null;
+let latestCsvPresignItems: S3PathPresignItem[] = [];
+let latestCsvHeaders: string[] = [];
+
+// In-memory cache for auto-detected S3 bucket objects reports
+let latestDetectedExcelBuffer: Uint8Array | null = null;
+let latestDetectedCsvContent: string | null = null;
+let latestDetectedItems: S3DetectedObjectItem[] = [];
+let latestDetectedBucket = '';
+let latestDetectedPrefix = '';
 
 // API: Health check
 app.get('/api/health', (req, res) => {
@@ -626,6 +647,272 @@ app.get('/api/s3/download-generic-csv', (req, res) => {
     res.send(latestGenericCsvContent);
   } catch (err: any) {
     res.status(500).send(err.message || 'Failed to download CSV');
+  }
+});
+
+// Helper: robust CSV text parser
+function parseCsvSimple(csvText: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
+  if (nonEmptyLines.length === 0) {
+    return { headers: [], rows: [] };
+  }
+
+  const parseLine = (text: string): string[] => {
+    const result: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (char === '"') {
+        if (inQuotes && text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(cur.trim());
+        cur = '';
+      } else {
+        cur += char;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  };
+
+  const headers = parseLine(nonEmptyLines[0]).map((h) => h.replace(/^["']|["']$/g, '').trim());
+  const rows: Record<string, string>[] = [];
+
+  for (let i = 1; i < nonEmptyLines.length; i++) {
+    const values = parseLine(nonEmptyLines[i]);
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      row[h] = (values[idx] ?? '').replace(/^["']|["']$/g, '');
+    });
+    rows.push(row);
+  }
+
+  return { headers, rows };
+}
+
+// API: Scenario 1 - Generate 7-day validity URLs from a CSV containing header "s3path"
+app.post('/api/s3/presign-from-csv', async (req, res) => {
+  try {
+    const { csvText, rows: inputRows, s3Config = {} } = req.body;
+
+    let headers: string[] = [];
+    let rows: Record<string, string>[] = [];
+
+    if (csvText && typeof csvText === 'string') {
+      const parsed = parseCsvSimple(csvText);
+      headers = parsed.headers;
+      rows = parsed.rows;
+    } else if (Array.isArray(inputRows)) {
+      rows = inputRows;
+      if (rows.length > 0) {
+        headers = Object.keys(rows[0]);
+      }
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No CSV data provided or CSV is empty. Please provide CSV with header "s3path".',
+      });
+    }
+
+    // Locate column with name "s3path" (case-insensitive)
+    let s3PathHeader = headers.find(
+      (h) => h.toLowerCase() === 's3path' || h.toLowerCase() === 's3_path',
+    );
+    if (!s3PathHeader) {
+      // Fallback: search for header containing "s3" or "path"
+      s3PathHeader = headers.find(
+        (h) => h.toLowerCase().includes('s3') || h.toLowerCase().includes('path'),
+      );
+    }
+    if (!s3PathHeader && headers.length > 0) {
+      s3PathHeader = headers[0]; // fallback to first column
+    }
+
+    const itemsToPresign = rows.map((r) => ({
+      s3path: s3PathHeader ? r[s3PathHeader] : (r['s3path'] || ''),
+      rowData: r,
+    }));
+
+    const presignResult = await presignS3PathList(itemsToPresign, s3Config);
+
+    // Generate Excel report with clickable hyperlinks
+    const excelBuffer = await generateS3PathCsvExcelReport(
+      presignResult.items,
+      headers,
+      s3Config.bucket || 'int-shaip-bucket',
+    );
+    const csvContent = generateS3PathCsvTextReport(presignResult.items, headers);
+
+    // Cache latest result for direct downloads
+    latestCsvPresignExcelBuffer = excelBuffer;
+    latestCsvPresignCsvContent = csvContent;
+    latestCsvPresignItems = presignResult.items;
+    latestCsvHeaders = headers;
+
+    res.json({
+      success: presignResult.success,
+      totalCount: presignResult.total,
+      successfulCount: presignResult.successfulCount,
+      failedCount: presignResult.failedCount,
+      detectedHeader: s3PathHeader,
+      headers,
+      items: presignResult.items,
+      csvContent,
+      message: `Generated 7-day validity inline presigned URLs for ${presignResult.successfulCount} of ${presignResult.total} items.`,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/s3/presign-from-csv:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process s3path CSV',
+    });
+  }
+});
+
+// API: Scenario 2 - Auto-detect all files from S3 Bucket + Prefix and generate 7-day validity URLs
+app.post('/api/s3/auto-detect-and-presign', async (req, res) => {
+  try {
+    const { s3Config = {}, limit = 2000 } = req.body;
+    const bucket = (s3Config.bucket || 'int-shaip-bucket').trim();
+    const prefix = (s3Config.prefix || '').trim();
+
+    if (!bucket) {
+      return res.status(400).json({
+        success: false,
+        error: 'S3 bucket name is required.',
+      });
+    }
+
+    const detectResult = await listAndPresignBucketObjects(s3Config, Number(limit) || 2000);
+
+    if (!detectResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: detectResult.error || 'Failed to list and presign files from S3 bucket',
+      });
+    }
+
+    // Generate Excel report with clickable hyperlinks
+    const excelBuffer = await generateDetectedObjectsExcel(
+      detectResult.items,
+      bucket,
+      prefix,
+    );
+    const csvContent = generateDetectedObjectsCsv(
+      detectResult.items,
+      bucket,
+      prefix,
+    );
+
+    // Cache latest result for direct downloads
+    latestDetectedExcelBuffer = excelBuffer;
+    latestDetectedCsvContent = csvContent;
+    latestDetectedItems = detectResult.items;
+    latestDetectedBucket = bucket;
+    latestDetectedPrefix = prefix;
+
+    res.json({
+      success: true,
+      bucket,
+      prefix,
+      totalFound: detectResult.totalFound,
+      items: detectResult.items,
+      csvContent,
+      message: `Auto-detected ${detectResult.totalFound} files in s3://${bucket}/${prefix.replace(/^\/+/, '')} and generated 7-day inline URLs.`,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/s3/auto-detect-and-presign:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to auto-detect S3 bucket files',
+    });
+  }
+});
+
+// API: Download CSV Presign Excel report (.xlsx)
+app.get('/api/s3/download-csv-presign-excel', (req, res) => {
+  try {
+    if (!latestCsvPresignExcelBuffer) {
+      return res.status(404).send('No CSV presign report has been generated yet.');
+    }
+    const filename = 'S3Path_Presigned_URLs_7Days.xlsx';
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.send(Buffer.from(latestCsvPresignExcelBuffer));
+  } catch (err: any) {
+    res.status(500).send(err.message || 'Failed to download Excel report');
+  }
+});
+
+// API: Download CSV Presign CSV report (.csv)
+app.get('/api/s3/download-csv-presign-csv', (req, res) => {
+  try {
+    if (!latestCsvPresignCsvContent) {
+      return res.status(404).send('No CSV presign report has been generated yet.');
+    }
+    const filename = 'S3Path_Presigned_URLs_7Days.csv';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.send(latestCsvPresignCsvContent);
+  } catch (err: any) {
+    res.status(500).send(err.message || 'Failed to download CSV report');
+  }
+});
+
+// API: Download Auto-Detected S3 Objects Excel report (.xlsx)
+app.get('/api/s3/download-detected-excel', (req, res) => {
+  try {
+    if (!latestDetectedExcelBuffer) {
+      return res.status(404).send('No auto-detected S3 files report has been generated yet.');
+    }
+    const filename = 'S3_Detected_Files_Presigned_URLs.xlsx';
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.send(Buffer.from(latestDetectedExcelBuffer));
+  } catch (err: any) {
+    res.status(500).send(err.message || 'Failed to download Excel report');
+  }
+});
+
+// API: Download Auto-Detected S3 Objects CSV report (.csv)
+app.get('/api/s3/download-detected-csv', (req, res) => {
+  try {
+    if (!latestDetectedCsvContent) {
+      return res.status(404).send('No auto-detected S3 files report has been generated yet.');
+    }
+    const filename = 'S3_Detected_Files_Presigned_URLs.csv';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"`,
+    );
+    res.send(latestDetectedCsvContent);
+  } catch (err: any) {
+    res.status(500).send(err.message || 'Failed to download CSV report');
   }
 });
 

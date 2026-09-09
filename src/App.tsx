@@ -14,13 +14,14 @@ import { TagAnalytics } from './components/TagAnalytics';
 import { PipelineLogs } from './components/PipelineLogs';
 import { HelpModal } from './components/HelpModal';
 import { GenericS3Uploader } from './components/GenericS3Uploader';
+import { DocsGuide } from './components/DocsGuide';
 import { SAMPLE_SOAP_NOTES } from './services/sampleData';
 import { processRawFileList } from './services/processor';
 import { generateReviewWorkbook } from './services/excelGenerator';
 import { NoteRecord, S3Config, PipelineLog, S3UploadStats } from './types';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'clinical' | 'generic-s3'>('clinical');
+  const [activeTab, setActiveTab] = useState<'clinical' | 'generic-s3' | 'docs'>('clinical');
   const [s3Config, setS3Config] = useState<S3Config>({
     bucket: 'int-shaip-bucket',
     prefix: 'interns-test-data/SEP8/',
@@ -480,7 +481,7 @@ export default function App() {
               <TagAnalytics records={records} detectedTags={detectedTags} />
             )}
           </>
-        ) : (
+        ) : activeTab === 'generic-s3' ? (
           /* Feature: Any-File S3 Uploader & Presigned URL Excel/CSV Generator */
           <GenericS3Uploader
             s3Config={s3Config}
@@ -489,6 +490,9 @@ export default function App() {
             isTestingS3={isTestingS3}
             s3TestResult={s3TestResult}
           />
+        ) : (
+          /* Documentation & Local Setup Guide */
+          <DocsGuide />
         )}
 
         {/* Step 5: Terminal / Pipeline Execution Logs */}

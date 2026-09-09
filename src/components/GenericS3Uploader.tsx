@@ -34,6 +34,8 @@ import {
   generatePresignedUrlsExcel,
   generatePresignedUrlsCsv,
 } from '../services/genericPresignedReportGenerator';
+import { S3PathCsvUploader } from './S3PathCsvUploader';
+import { S3AutoDetector } from './S3AutoDetector';
 
 interface GenericS3UploaderProps {
   s3Config: S3Config;
@@ -63,6 +65,7 @@ export const GenericS3Uploader: React.FC<GenericS3UploaderProps> = ({
   isTestingS3,
   s3TestResult,
 }) => {
+  const [activeWorkflow, setActiveWorkflow] = useState<'s3path-csv' | 'auto-detect' | 'local-upload'>('s3path-csv');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -550,8 +553,128 @@ export const GenericS3Uploader: React.FC<GenericS3UploaderProps> = ({
         </div>
       )}
 
-      {/* File Upload & Drop Zone */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
+      {/* Workflow Mode Tabs (Scenario 1 vs Scenario 2 vs Local Support) */}
+      <div className="bg-white rounded-2xl p-2 border border-slate-200 shadow-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveWorkflow('s3path-csv')}
+            className={`flex items-start gap-3 p-3 rounded-xl text-left transition-all cursor-pointer ${
+              activeWorkflow === 's3path-csv'
+                ? 'bg-indigo-50/80 border border-indigo-200 shadow-xs'
+                : 'hover:bg-slate-50 border border-transparent'
+            }`}
+          >
+            <div
+              className={`p-2 rounded-lg shrink-0 ${
+                activeWorkflow === 's3path-csv'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-900">1. Share `s3path` CSV</span>
+                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-700">
+                  7-Day URLs
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                Provide CSV with header <code className="font-mono text-indigo-600">s3path</code> &bull; Generates 7-day inline URLs
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveWorkflow('auto-detect')}
+            className={`flex items-start gap-3 p-3 rounded-xl text-left transition-all cursor-pointer ${
+              activeWorkflow === 'auto-detect'
+                ? 'bg-emerald-50/80 border border-emerald-200 shadow-xs'
+                : 'hover:bg-slate-50 border border-transparent'
+            }`}
+          >
+            <div
+              className={`p-2 rounded-lg shrink-0 ${
+                activeWorkflow === 'auto-detect'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-900">2. Auto-Detect S3 Files</span>
+                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                  Auto Scan
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                Add bucket & prefix &bull; Auto-detects all files & generates 7-day URLs
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveWorkflow('local-upload')}
+            className={`flex items-start gap-3 p-3 rounded-xl text-left transition-all cursor-pointer ${
+              activeWorkflow === 'local-upload'
+                ? 'bg-sky-50/80 border border-sky-200 shadow-xs'
+                : 'hover:bg-slate-50 border border-transparent'
+            }`}
+          >
+            <div
+              className={`p-2 rounded-lg shrink-0 ${
+                activeWorkflow === 'local-upload'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <UploadCloud className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-slate-900">3. Upload Local Files</span>
+                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-sky-100 text-sky-700">
+                  Direct Upload
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                Drag & drop any files or folders to upload to S3 & generate reports
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Scenario 1 Content */}
+      {activeWorkflow === 's3path-csv' && (
+        <S3PathCsvUploader
+          s3Config={s3Config}
+          onS3ConfigChange={onS3ConfigChange}
+        />
+      )}
+
+      {/* Scenario 2 Content */}
+      {activeWorkflow === 'auto-detect' && (
+        <S3AutoDetector
+          s3Config={s3Config}
+          onS3ConfigChange={onS3ConfigChange}
+          onTestS3Connection={onTestS3Connection}
+          isTestingS3={isTestingS3}
+          s3TestResult={s3TestResult}
+        />
+      )}
+
+      {/* Local Files Upload Support */}
+      {activeWorkflow === 'local-upload' && (
+        <div className="space-y-6">
+          {/* File Upload & Drop Zone */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
             <UploadCloud className="w-4 h-4 text-indigo-600" />
@@ -935,6 +1058,8 @@ export const GenericS3Uploader: React.FC<GenericS3UploaderProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
         </div>
       )}
     </div>

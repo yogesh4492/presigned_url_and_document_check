@@ -240,3 +240,363 @@ export function generatePresignedUrlsCsv(
 
   return rows.join('\r\n');
 }
+
+export interface S3PathPresignItem {
+  index: number;
+  originalRow: Record<string, string>;
+  s3Path: string;
+  bucket: string;
+  key: string;
+  fileName: string;
+  mimeType: string;
+  presignedUrl: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface S3DetectedObjectItem {
+  key: string;
+  name: string;
+  size: number;
+  lastModified?: string;
+  mimeType: string;
+  presignedUrl: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Generates an Excel workbook (.xlsx) preserving all original CSV headers
+ * and appending clickable 7-day presigned URLs.
+ */
+export async function generateS3PathCsvExcelReport(
+  items: S3PathPresignItem[],
+  headersList: string[],
+  bucket: string,
+): Promise<Uint8Array> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'S3 Presigned URL Dispatcher';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet('S3 Presigned URLs', {
+    views: [{ state: 'frozen', ySplit: 2 }],
+  });
+
+  const titleFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF0F172A' }, // Slate 900
+  };
+
+  const headerFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF1E293B' }, // Slate 800
+  };
+
+  const borderStyle: Partial<ExcelJS.Borders> = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  // Columns: all original CSV headers + presigned_url_7days + file_name + mime_type + status
+  const finalHeaders = [
+    ...headersList,
+    'presigned_url_7days (Click to Open)',
+    'mime_type',
+    'presigned_status',
+  ];
+
+  // Banner row
+  const lastColLetter = String.fromCharCode(65 + Math.min(25, finalHeaders.length - 1));
+  worksheet.mergeCells(`A1:${lastColLetter}1`);
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = `AWS S3 Presigned URLs Report (From CSV) • 7-Day Validity (Inline Browser On-Click Openable) • ${items.length} Items`;
+  titleCell.fill = titleFill;
+  titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  worksheet.getRow(1).height = 28;
+
+  // Header row
+  const headerRow = worksheet.addRow(finalHeaders);
+  headerRow.height = 26;
+  headerRow.eachCell((cell) => {
+    cell.fill = headerFill;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = borderStyle;
+  });
+
+  // Data rows
+  items.forEach((item) => {
+    const rowValues = headersList.map((h) => item.originalRow[h] ?? item.originalRow[h.toLowerCase()] ?? '');
+    rowValues.push(item.presignedUrl || (item.error || 'Failed to generate'));
+    rowValues.push(item.mimeType);
+    rowValues.push(item.success ? 'Active (7 Days)' : (item.error || 'Error'));
+
+    const row = worksheet.addRow(rowValues);
+    row.height = 22;
+
+    row.eachCell((cell) => {
+      cell.border = borderStyle;
+      cell.font = { name: 'Calibri', size: 9 };
+    });
+
+    // Make the presigned_url cell a clickable link
+    const urlColIndex = headersList.length + 1;
+    if (item.success && item.presignedUrl) {
+      const urlCell = row.getCell(urlColIndex);
+      urlCell.value = {
+        text: item.presignedUrl,
+        hyperlink: item.presignedUrl,
+        tooltip: 'Click to open file inline in browser (7-day validity)',
+      };
+      urlCell.font = {
+        name: 'Calibri',
+        size: 9,
+        color: { argb: 'FF0284C7' }, // Sky 600
+        underline: true,
+      };
+
+      const statusCell = row.getCell(headersList.length + 3);
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE2F0D9' },
+      };
+      statusCell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF166534' } };
+    }
+  });
+
+  // Set widths
+  headersList.forEach((_, idx) => {
+    worksheet.getColumn(idx + 1).width = 24;
+  });
+  worksheet.getColumn(headersList.length + 1).width = 65; // Presigned URL
+  worksheet.getColumn(headersList.length + 2).width = 20; // Mime type
+  worksheet.getColumn(headersList.length + 3).width = 20; // Status
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Generates an RFC 4180 CSV preserving original CSV columns + presigned_url_7days
+ */
+export function generateS3PathCsvTextReport(
+  items: S3PathPresignItem[],
+  headersList: string[],
+): string {
+  const escapeCsv = (val: any) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const finalHeaders = [
+    ...headersList,
+    'presigned_url_7days',
+    'mime_type',
+    'presigned_status',
+  ];
+
+  const rows: string[] = [];
+  rows.push(finalHeaders.map(escapeCsv).join(','));
+
+  items.forEach((item) => {
+    const rowValues = headersList.map((h) => item.originalRow[h] ?? item.originalRow[h.toLowerCase()] ?? '');
+    rowValues.push(item.presignedUrl || '');
+    rowValues.push(item.mimeType);
+    rowValues.push(item.success ? 'Active (7 Days)' : (item.error || 'Failed'));
+    rows.push(rowValues.map(escapeCsv).join(','));
+  });
+
+  return rows.join('\r\n');
+}
+
+/**
+ * Generates an Excel report for detected files inside an S3 bucket + prefix
+ */
+export async function generateDetectedObjectsExcel(
+  items: S3DetectedObjectItem[],
+  bucket: string,
+  prefix: string,
+): Promise<Uint8Array> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'S3 Bucket Auto-Detector';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet('Detected Files', {
+    views: [{ state: 'frozen', ySplit: 2 }],
+  });
+
+  const titleFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF0F172A' },
+  };
+
+  const headerFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF1E293B' },
+  };
+
+  const borderStyle: Partial<ExcelJS.Borders> = {
+    top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+    right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  };
+
+  worksheet.mergeCells('A1:H1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = `AWS S3 Bucket Auto-Detected Files • s3://${bucket}/${prefix.replace(/^\/+/, '')} • 7-Day Validity Inline URLs • ${items.length} Files`;
+  titleCell.fill = titleFill;
+  titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  worksheet.getRow(1).height = 28;
+
+  const headers = [
+    '#',
+    'File Name (Click to Open)',
+    'S3 Object Key',
+    'Size',
+    'MIME Type',
+    'Last Modified',
+    'Inline Presigned URL (7-Day Expiry)',
+    'Status',
+  ];
+
+  const headerRow = worksheet.addRow(headers);
+  headerRow.height = 26;
+  headerRow.eachCell((cell) => {
+    cell.fill = headerFill;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = borderStyle;
+  });
+
+  items.forEach((item, idx) => {
+    const row = worksheet.addRow([
+      idx + 1,
+      item.name,
+      item.key,
+      formatBytes(item.size),
+      item.mimeType,
+      item.lastModified ? new Date(item.lastModified).toLocaleString() : '-',
+      item.presignedUrl || (item.error || 'Failed'),
+      item.success ? 'Active (7 Days)' : 'Failed',
+    ]);
+    row.height = 22;
+
+    row.eachCell((cell) => {
+      cell.border = borderStyle;
+      cell.font = { name: 'Calibri', size: 9 };
+    });
+
+    if (item.success && item.presignedUrl) {
+      // Hyperlink for File Name
+      const nameCell = row.getCell(2);
+      nameCell.value = {
+        text: item.name,
+        hyperlink: item.presignedUrl,
+        tooltip: 'Click to open file inline in browser',
+      };
+      nameCell.font = {
+        name: 'Calibri',
+        size: 9,
+        color: { argb: 'FF0284C7' },
+        underline: true,
+        bold: true,
+      };
+
+      // Hyperlink for Presigned URL
+      const urlCell = row.getCell(7);
+      urlCell.value = {
+        text: item.presignedUrl,
+        hyperlink: item.presignedUrl,
+        tooltip: 'Click to open file inline in browser (7-day validity)',
+      };
+      urlCell.font = {
+        name: 'Calibri',
+        size: 9,
+        color: { argb: 'FF2563EB' },
+        underline: true,
+      };
+
+      const statusCell = row.getCell(8);
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE2F0D9' },
+      };
+      statusCell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF166534' } };
+    }
+  });
+
+  worksheet.getColumn(1).width = 6;
+  worksheet.getColumn(2).width = 32;
+  worksheet.getColumn(3).width = 45;
+  worksheet.getColumn(4).width = 14;
+  worksheet.getColumn(5).width = 22;
+  worksheet.getColumn(6).width = 24;
+  worksheet.getColumn(7).width = 65;
+  worksheet.getColumn(8).width = 18;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Generates CSV string for detected S3 objects
+ */
+export function generateDetectedObjectsCsv(
+  items: S3DetectedObjectItem[],
+  bucket: string,
+  prefix: string,
+): string {
+  const escapeCsv = (val: any) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const rows: string[] = [];
+  rows.push(
+    [
+      'Index',
+      'File Name',
+      'S3 Bucket',
+      'S3 Object Key',
+      'Size Bytes',
+      'Size Formatted',
+      'MIME Type',
+      'Last Modified',
+      'Inline Presigned URL (7-Day Expiry)',
+      'Status',
+    ].map(escapeCsv).join(','),
+  );
+
+  items.forEach((item, idx) => {
+    rows.push(
+      [
+        idx + 1,
+        item.name,
+        bucket,
+        item.key,
+        item.size,
+        formatBytes(item.size),
+        item.mimeType,
+        item.lastModified || '',
+        item.presignedUrl || '',
+        item.success ? 'Active' : 'Failed',
+      ].map(escapeCsv).join(','),
+    );
+  });
+
+  return rows.join('\r\n');
+}
+

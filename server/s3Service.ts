@@ -515,3 +515,308 @@ export async function uploadAnyFilesToS3(
   };
 }
 
+/**
+ * Parses diverse S3 URI/path formats:
+ * - s3://bucket-name/folder/file.ext
+ * - https://bucket-name.s3.amazonaws.com/folder/file.ext
+ * - /folder/file.ext (uses defaultBucket)
+ * - folder/file.ext (uses defaultBucket)
+ * - bucket-name/folder/file.ext
+ */
+export function parseS3Uri(
+  rawPath: string,
+  defaultBucket: string = 'int-shaip-bucket',
+): { bucket: string; key: string } {
+  let cleaned = (rawPath || '').trim();
+  cleaned = cleaned.replace(/^["']|["']$/g, '');
+
+  if (cleaned.startsWith('s3://')) {
+    const withoutScheme = cleaned.slice(5);
+    const slashIdx = withoutScheme.indexOf('/');
+    if (slashIdx !== -1) {
+      return {
+        bucket: withoutScheme.slice(0, slashIdx),
+        key: withoutScheme.slice(slashIdx + 1).replace(/^\/+/, ''),
+      };
+    }
+    return { bucket: withoutScheme, key: '' };
+  }
+
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) {
+    try {
+      const url = new URL(cleaned);
+      const host = url.hostname;
+      if (host.includes('s3.amazonaws.com') || host.includes('.s3.') || host.includes('.s3-')) {
+        const hostParts = host.split('.');
+        if (hostParts.length >= 4) {
+          const bucket = hostParts[0];
+          const key = url.pathname.replace(/^\/+/, '');
+          return { bucket, key };
+        }
+        if (host === 's3.amazonaws.com') {
+          const pathParts = url.pathname.replace(/^\/+/, '').split('/');
+          const bucket = pathParts[0];
+          const key = pathParts.slice(1).join('/');
+          return { bucket, key };
+        }
+      }
+    } catch {
+      // ignore URL parsing error
+    }
+  }
+
+  const normalized = cleaned.replace(/^\/+/, '');
+
+  if (defaultBucket && normalized.startsWith(`${defaultBucket}/`)) {
+    return {
+      bucket: defaultBucket,
+      key: normalized.slice(defaultBucket.length + 1),
+    };
+  }
+
+  return {
+    bucket: defaultBucket || 'int-shaip-bucket',
+    key: normalized,
+  };
+}
+
+export interface S3PathPresignItem {
+  index: number;
+  originalRow: Record<string, string>;
+  s3Path: string;
+  bucket: string;
+  key: string;
+  fileName: string;
+  mimeType: string;
+  presignedUrl: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Generates 7-day validity inline-openable presigned URLs for an array of items with s3path
+ */
+export async function presignS3PathList(
+  items: Array<{ s3path: string; rowData?: Record<string, string> }>,
+  config: S3CredentialsConfig,
+): Promise<{
+  success: boolean;
+  total: number;
+  successfulCount: number;
+  failedCount: number;
+  items: S3PathPresignItem[];
+}> {
+  const defaultBucket = (config.bucket || 'int-shaip-bucket').trim();
+  const presignDays = 7; // strictly 7 days validity per user prompt
+  const expiresSeconds = presignDays * 24 * 60 * 60; // 604,800 seconds
+  const s3 = getS3Client(config);
+
+  const results: S3PathPresignItem[] = [];
+  let successfulCount = 0;
+  let failedCount = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const raw = items[i];
+    const s3Path = (raw.s3path || '').trim();
+    const rowData = raw.rowData || { s3path: s3Path };
+
+    if (!s3Path) {
+      results.push({
+        index: i + 1,
+        originalRow: rowData,
+        s3Path: '',
+        bucket: defaultBucket,
+        key: '',
+        fileName: '',
+        mimeType: 'application/octet-stream',
+        presignedUrl: '',
+        success: false,
+        error: 'Empty s3path column',
+      });
+      failedCount++;
+      continue;
+    }
+
+    const { bucket, key } = parseS3Uri(s3Path, defaultBucket);
+    const basename = key.split(/[/\\]/).pop() || key || 'file';
+    const mimeType = guessMimeType(basename);
+
+    try {
+      const presignedUrl = await getSignedUrl(
+        s3,
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          ResponseContentDisposition: `inline; filename="${encodeURIComponent(basename)}"`,
+          ResponseContentType: mimeType,
+        }),
+        { expiresIn: expiresSeconds },
+      );
+
+      results.push({
+        index: i + 1,
+        originalRow: rowData,
+        s3Path,
+        bucket,
+        key,
+        fileName: basename,
+        mimeType,
+        presignedUrl,
+        success: true,
+      });
+      successfulCount++;
+    } catch (err: any) {
+      console.warn(`Presign fallback for s3path ${s3Path}:`, err.message);
+      results.push({
+        index: i + 1,
+        originalRow: rowData,
+        s3Path,
+        bucket,
+        key,
+        fileName: basename,
+        mimeType,
+        presignedUrl: `https://${bucket}.s3.amazonaws.com/${key}`,
+        success: false,
+        error: err.message || 'Presign failed',
+      });
+      failedCount++;
+    }
+  }
+
+  return {
+    success: successfulCount > 0,
+    total: items.length,
+    successfulCount,
+    failedCount,
+    items: results,
+  };
+}
+
+export interface S3DetectedObjectItem {
+  key: string;
+  name: string;
+  size: number;
+  lastModified?: string;
+  mimeType: string;
+  presignedUrl: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Lists all files inside an S3 bucket + prefix using ListObjectsV2
+ * and generates 7-day validity inline-onclick presigned URLs
+ */
+export async function listAndPresignBucketObjects(
+  config: S3CredentialsConfig,
+  limit: number = 2000,
+): Promise<{
+  success: boolean;
+  bucket: string;
+  prefix: string;
+  totalFound: number;
+  items: S3DetectedObjectItem[];
+  error?: string;
+}> {
+  const bucket = (config.bucket || 'int-shaip-bucket').trim();
+  const rawPrefix = (config.prefix || '').trim();
+  const prefix = rawPrefix.replace(/^\/+/, '');
+  const presignDays = 7; // strictly 7 days validity
+  const expiresSeconds = presignDays * 24 * 60 * 60; // 604,800 seconds
+  const s3 = getS3Client(config);
+
+  try {
+    const detected: Array<{ key: string; size: number; lastModified?: Date }> = [];
+    let continuationToken: string | undefined = undefined;
+
+    do {
+      const response = await s3.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+          MaxKeys: Math.min(1000, limit - detected.length),
+        }),
+      );
+
+      if (response.Contents) {
+        for (const obj of response.Contents) {
+          if (!obj.Key) continue;
+          // Filter out pure folder marker keys
+          if (obj.Key.endsWith('/') && (!obj.Size || obj.Size === 0)) {
+            continue;
+          }
+          detected.push({
+            key: obj.Key,
+            size: obj.Size ?? 0,
+            lastModified: obj.LastModified,
+          });
+          if (detected.length >= limit) break;
+        }
+      }
+
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken && detected.length < limit);
+
+    const items: S3DetectedObjectItem[] = [];
+
+    // Presign each detected file
+    for (const obj of detected) {
+      const basename = obj.key.split(/[/\\]/).pop() || obj.key;
+      const mimeType = guessMimeType(basename);
+
+      try {
+        const presignedUrl = await getSignedUrl(
+          s3,
+          new GetObjectCommand({
+            Bucket: bucket,
+            Key: obj.key,
+            ResponseContentDisposition: `inline; filename="${encodeURIComponent(basename)}"`,
+            ResponseContentType: mimeType,
+          }),
+          { expiresIn: expiresSeconds },
+        );
+
+        items.push({
+          key: obj.key,
+          name: basename,
+          size: obj.size,
+          lastModified: obj.lastModified ? obj.lastModified.toISOString() : undefined,
+          mimeType,
+          presignedUrl,
+          success: true,
+        });
+      } catch (err: any) {
+        items.push({
+          key: obj.key,
+          name: basename,
+          size: obj.size,
+          lastModified: obj.lastModified ? obj.lastModified.toISOString() : undefined,
+          mimeType,
+          presignedUrl: `https://${bucket}.s3.amazonaws.com/${obj.key}`,
+          success: false,
+          error: err.message || 'Presign failed',
+        });
+      }
+    }
+
+    return {
+      success: true,
+      bucket,
+      prefix,
+      totalFound: items.length,
+      items,
+    };
+  } catch (err: any) {
+    console.error(`Error in listAndPresignBucketObjects for s3://${bucket}/${prefix}:`, err);
+    return {
+      success: false,
+      bucket,
+      prefix,
+      totalFound: 0,
+      items: [],
+      error: err.message || 'Failed to list objects in S3 bucket',
+    };
+  }
+}
+

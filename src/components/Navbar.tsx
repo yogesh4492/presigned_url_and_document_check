@@ -6,11 +6,12 @@ import {
   HelpCircle,
   UploadCloud,
   FileText,
+  BookOpen,
 } from 'lucide-react';
 
 interface NavbarProps {
-  activeTab: 'clinical' | 'generic-s3';
-  onTabChange: (tab: 'clinical' | 'generic-s3') => void;
+  activeTab: 'clinical' | 'generic-s3' | 'docs';
+  onTabChange: (tab: 'clinical' | 'generic-s3' | 'docs') => void;
   onDownloadExcel: () => void;
   onOpenHelp: () => void;
   onLoadSample: () => void;
@@ -88,8 +89,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <UploadCloud className="w-3.5 h-3.5" />
               <span>Any-File S3 Uploader</span>
-              <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                New
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onTabChange('docs')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'docs'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/60'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Docs & Local Setup</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
+                Guide
               </span>
             </button>
           </div>
