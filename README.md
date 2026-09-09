@@ -225,6 +225,44 @@ npm start
 
 ---
 
+### 6. Changing Port to 0.0.0.0:8000 for IP Access by Team Members
+The server already binds to `0.0.0.0` (all network interfaces), allowing anyone on your local network (LAN) or virtual private cloud (VPC) to access it via your machine's IP address.
+
+To change the port from `3000` to `8000`:
+
+#### Method A: Edit `server.ts` on your local machine
+In `server.ts` (around line 34), change:
+```ts
+const PORT = 8000; // Change 3000 to 8000
+```
+Then restart the server:
+```bash
+npm run dev
+# or for production:
+npm run build && npm start
+```
+
+#### Method B: Docker Port Mapping (No code changes needed!)
+If running via Docker, you can map port `8000` on your host machine to container port `3000`:
+```bash
+docker run -d -p 8000:3000 \
+  -e S3_BUCKET_NAME="int-shaip-bucket" \
+  --name clinical-app clinical-s3-pipeline
+```
+
+#### Finding your local IP address for team access:
+- **macOS / Linux**: run `ip a` or `ifconfig` or `hostname -I` (e.g. `192.168.1.50` or `10.0.0.12`)
+- **Windows**: run `ipconfig` (look for `IPv4 Address`)
+- **Firewall**: ensure port 8000 is permitted (`sudo ufw allow 8000/tcp` on Ubuntu/Debian)
+
+Your team can then open:
+```
+http://<YOUR_LOCAL_IP>:8000
+# Example: http://192.168.1.50:8000
+```
+
+---
+
 ## Host & Publish on GitHub
 
 ### 1. Initialize Git & First Commit

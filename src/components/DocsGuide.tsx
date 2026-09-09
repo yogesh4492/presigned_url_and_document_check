@@ -281,6 +281,91 @@ docker run -d -p 3000:3000 \\
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
+
+            {/* Change Port to 0.0.0.0:8000 for IP Access by Team Members */}
+            <div className="p-5 bg-indigo-50/70 rounded-2xl border border-indigo-200 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Want to Change Port to 0.0.0.0:8000 for Team/IP Access?
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-200 text-indigo-800">
+                      LAN / IP Access
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    The backend server already binds to <code className="font-mono font-semibold text-indigo-700">0.0.0.0</code> (all network interfaces). This allows anyone on your local network (LAN) or office subnet to connect directly using your computer&apos;s IP address.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                {/* Option 1 */}
+                <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800">Method 1: Change PORT in server.ts</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('const PORT = 8000;', 'port-code')}
+                      className="text-[11px] font-semibold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedCode === 'port-code' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCode === 'port-code' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="text-slate-500 text-[11px]">
+                    In <code className="font-mono text-slate-700">server.ts</code> (line 34), change:
+                  </p>
+                  <pre className="p-2.5 bg-slate-900 text-emerald-400 rounded-lg font-mono text-[11px] overflow-x-auto">
+{`// server.ts
+const PORT = 8000;`}
+                  </pre>
+                  <p className="text-slate-500 text-[11px]">
+                    Then run <code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">npm run dev</code> or <code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">npm start</code>.
+                  </p>
+                </div>
+
+                {/* Option 2 */}
+                <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800">Method 2: Docker Port Forwarding</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('docker run -d -p 8000:3000 --name clinical-app clinical-s3-pipeline', 'docker-port')}
+                      className="text-[11px] font-semibold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedCode === 'docker-port' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCode === 'docker-port' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="text-slate-500 text-[11px]">
+                    No code changes needed! Map port 8000 directly:
+                  </p>
+                  <pre className="p-2.5 bg-slate-900 text-emerald-400 rounded-lg font-mono text-[11px] overflow-x-auto">
+{`docker run -d -p 8000:3000 clinical-s3-pipeline`}
+                  </pre>
+                  <p className="text-slate-500 text-[11px]">
+                    Docker maps your host&apos;s 0.0.0.0:8000 to the container.
+                  </p>
+                </div>
+              </div>
+
+              {/* Finding IP */}
+              <div className="p-3 bg-white/80 rounded-xl border border-indigo-100 text-xs text-slate-700 space-y-1">
+                <span className="font-bold text-indigo-950 block">How your team accesses it:</span>
+                <p className="text-slate-600 text-[11px]">
+                  1. Find your IP: run <code className="font-mono bg-slate-100 px-1 rounded">ip a</code> or <code className="font-mono bg-slate-100 px-1 rounded">ifconfig</code> (Linux/macOS) or <code className="font-mono bg-slate-100 px-1 rounded">ipconfig</code> (Windows). Example IP: <code className="font-mono text-indigo-700 font-semibold">192.168.1.50</code>.
+                </p>
+                <p className="text-slate-600 text-[11px]">
+                  2. Make sure firewall allows port 8000 (<code className="font-mono bg-slate-100 px-1 rounded">sudo ufw allow 8000/tcp</code> on Ubuntu).
+                </p>
+                <p className="text-slate-600 text-[11px]">
+                  3. Share with your team: <code className="font-mono bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded border border-indigo-200">http://&lt;YOUR_IP&gt;:8000</code> (e.g. <code className="font-mono text-indigo-700 font-bold">http://192.168.1.50:8000</code>).
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}
