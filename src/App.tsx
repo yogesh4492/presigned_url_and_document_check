@@ -51,6 +51,7 @@ export default function App() {
     errorDetail?: string;
   } | null>(null);
   const [isUploadingS3, setIsUploadingS3] = useState<boolean>(false);
+  const [isPresigning, setIsPresigning] = useState<boolean>(false);
   const [s3WorkbookUrl, setS3WorkbookUrl] = useState<string | null>(null);
   const [, setS3UploadStats] = useState<S3UploadStats | null>(null);
 
@@ -158,6 +159,53 @@ export default function App() {
     }
   };
 
+  // Helper to re-sign loaded note records with fresh 7-day authentic presigned URLs
+  const handlePresignRecords = async () => {
+    if (records.length === 0) {
+      addLog('warn', 'No clinical note records currently loaded to presign.');
+      return;
+    }
+
+    setIsPresigning(true);
+    addLog('info', `Generating authentic 7-day presigned URLs for ${records.length} clinical note records...`);
+
+    try {
+      const res = await fetch('/api/s3/presign-clinical-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          records,
+          detectedTags,
+          s3Bucket: s3Config.bucket,
+          s3Prefix: s3Config.prefix,
+          presignExpiresDays: s3Config.presignExpiresDays,
+          awsRegion: s3Config.awsRegion,
+          accessKeyId: s3Config.accessKeyId,
+          secretAccessKey: s3Config.secretAccessKey,
+          sessionToken: s3Config.sessionToken,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to presign clinical records');
+      }
+
+      setRecords(data.records);
+      await generateReviewWorkbook(data.records, detectedTags);
+
+      addLog(
+        'success',
+        `[S3 Presigned] ${data.message || `Presigned ${data.presignedCount} note links (expires in ${s3Config.presignExpiresDays} days)`}`,
+      );
+    } catch (err: any) {
+      console.error('Presigning clinical records failed:', err);
+      addLog('error', `[S3 Presign Error] ${err.message || String(err)}`);
+    } finally {
+      setIsPresigning(false);
+    }
+  };
+
   // Helper to process a raw array of file contents
   const executeFileProcessing = useCallback(
     async (
@@ -229,20 +277,54 @@ export default function App() {
           s3Config.presignExpiresDays,
         );
 
-        setRecords(processedRecords);
+        let finalRecords = processedRecords;
+        // Attempt authentic AWS S3 Presigning via backend (if credentials configured)
+        try {
+          const presignRes = await fetch('/api/s3/presign-clinical-records', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              records: processedRecords,
+              detectedTags: allDetectedTags,
+              s3Bucket: s3Config.bucket,
+              s3Prefix: s3Config.prefix,
+              presignExpiresDays: s3Config.presignExpiresDays,
+              awsRegion: s3Config.awsRegion,
+              accessKeyId: s3Config.accessKeyId,
+              secretAccessKey: s3Config.secretAccessKey,
+              sessionToken: s3Config.sessionToken,
+            }),
+          });
+          if (presignRes.ok) {
+            const presignData = await presignRes.json();
+            if (presignData.success && Array.isArray(presignData.records)) {
+              finalRecords = presignData.records;
+              if (presignData.presignedCount > 0) {
+                addLog(
+                  'success',
+                  `[S3 Presigned] Generated authentic 7-day presigned URLs for ${presignData.presignedCount} note file links.`,
+                );
+              }
+            }
+          }
+        } catch {
+          // fallback to clean canonical URLs
+        }
+
+        setRecords(finalRecords);
         setDetectedTags(allDetectedTags);
 
-        const completeCount = processedRecords.filter((r) => r.isComplete).length;
-        const totalRedactions = processedRecords.reduce((sum, r) => sum + r.totalRedacted, 0);
+        const completeCount = finalRecords.filter((r) => r.isComplete).length;
+        const totalRedactions = finalRecords.reduce((sum, r) => sum + r.totalRedacted, 0);
 
         addLog(
           'info',
-          `Collected note files: ${processedRecords.length} note groups identified (${completeCount} complete, ${processedRecords.length - completeCount} incomplete)`,
+          `Collected note files: ${finalRecords.length} note groups identified (${completeCount} complete, ${finalRecords.length - completeCount} incomplete)`,
         );
 
         addLog(
           'info',
-          `Generated S3 presigned URLs for ${processedRecords.length * 3} files with target s3://${s3Config.bucket}/${s3Config.prefix.replace(/\/+$/, '')} (expires in ${s3Config.presignExpiresDays} days)`,
+          `S3 target set to s3://${s3Config.bucket}/${s3Config.prefix.replace(/\/+$/, '')} (clean links, no invalid access key parameters)`,
         );
 
         addLog(
@@ -251,7 +333,7 @@ export default function App() {
         );
 
         // Pre-generate Excel workbook
-        await generateReviewWorkbook(processedRecords, allDetectedTags);
+        await generateReviewWorkbook(finalRecords, allDetectedTags);
 
         addLog(
           'success',
@@ -471,6 +553,8 @@ export default function App() {
               onDownloadExcel={handleDownloadExcel}
               onUploadToS3={handleUploadToS3}
               isUploadingS3={isUploadingS3}
+              onPresignRecords={handlePresignRecords}
+              isPresigning={isPresigning}
               s3WorkbookUrl={s3WorkbookUrl}
               s3Bucket={s3Config.bucket}
               s3Prefix={s3Config.prefix}

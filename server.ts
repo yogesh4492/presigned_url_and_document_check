@@ -15,6 +15,7 @@ import {
   uploadAnyFilesToS3,
   presignS3PathList,
   listAndPresignBucketObjects,
+  presignClinicalRecords,
   GenericFileInput,
   GenericUploadedItem,
   S3PathPresignItem,
@@ -424,6 +425,60 @@ app.post('/api/s3/upload-and-presign', async (req, res) => {
       success: false,
       error: error.message || 'S3 upload operation failed',
       errorCode: error.name || error.code,
+    });
+  }
+});
+
+// API: Generate real 7-day presigned URLs for existing clinical note records
+app.post('/api/s3/presign-clinical-records', async (req, res) => {
+  try {
+    const {
+      records,
+      detectedTags = [],
+      s3Bucket = 'int-shaip-bucket',
+      s3Prefix = 'interns-test-data/SEP8/',
+      presignExpiresDays = 7,
+      awsRegion,
+      accessKeyId,
+      secretAccessKey,
+      sessionToken,
+    } = req.body;
+
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No note records provided for presigning',
+      });
+    }
+
+    const s3Config = {
+      bucket: s3Bucket.trim() || 'int-shaip-bucket',
+      prefix: s3Prefix.trim() || 'interns-test-data/SEP8/',
+      presignExpiresDays: Number(presignExpiresDays) || 7,
+      awsRegion,
+      accessKeyId,
+      secretAccessKey,
+      sessionToken,
+    };
+
+    const presignResult = await presignClinicalRecords(records, s3Config);
+
+    // Update server in-memory state & workbook buffer with updated URLs
+    latestRecords = presignResult.records;
+    latestDetectedTags = detectedTags;
+    latestWorkbookBuffer = await generateReviewWorkbook(presignResult.records, detectedTags);
+
+    res.json({
+      success: true,
+      records: presignResult.records,
+      presignedCount: presignResult.presignedCount,
+      message: presignResult.message,
+    });
+  } catch (error: any) {
+    console.error('Error presigning clinical records:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to presign clinical records',
     });
   }
 });

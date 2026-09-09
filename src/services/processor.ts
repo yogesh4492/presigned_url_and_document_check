@@ -102,18 +102,12 @@ export function determineFileKind(filename: string): 'raw_txt' | 'deid_json' | '
 export function generateS3PresignedUrl(
   bucket: string,
   key: string,
-  expiresSeconds: number = 7 * 24 * 60 * 60,
+  _expiresSeconds: number = 7 * 24 * 60 * 60,
 ): string {
-  const cleanBucket = bucket.trim() || 'int-shaip-bucket';
+  const cleanBucket = (bucket || 'int-shaip-bucket').trim();
   const cleanKey = key.replace(/^\/+/, '');
-  const expiryTimestamp = Math.floor(Date.now() / 1000) + expiresSeconds;
-  
-  // Format standard AWS S3 presigned signature mock/real parameter structure
-  const fakeSig = Array.from({ length: 28 }, () =>
-    '0123456789abcdef'[Math.floor(Math.random() * 16)],
-  ).join('');
-
-  return `https://${cleanBucket}.s3.amazonaws.com/${cleanKey}?AWSAccessKeyId=AKIAIOSFODNN7EXAMPLE&Signature=${fakeSig}%3D&Expires=${expiryTimestamp}`;
+  // Generate clean S3 object URL without bogus query parameters that cause InvalidAccessKeyId errors
+  return `https://${cleanBucket}.s3.amazonaws.com/${cleanKey}`;
 }
 
 export function processRawFileList(

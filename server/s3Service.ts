@@ -820,3 +820,61 @@ export async function listAndPresignBucketObjects(
   }
 }
 
+/**
+ * Generates genuine 7-day validity inline presigned URLs for NoteRecords
+ */
+export async function presignClinicalRecords(
+  records: any[],
+  config: S3CredentialsConfig,
+): Promise<{
+  success: boolean;
+  records: any[];
+  presignedCount: number;
+  message: string;
+}> {
+  const bucket = (config.bucket || 'int-shaip-bucket').trim();
+  const presignDays = config.presignExpiresDays || 7;
+  const expiresSeconds = presignDays * 24 * 60 * 60; // 604,800 seconds
+  const s3 = getS3Client(config);
+
+  let presignedCount = 0;
+
+  for (const record of records) {
+    const fileSlots = ['raw_txt', 'deid_json', 'deid_txt'] as const;
+    for (const slot of fileSlots) {
+      const fileObj = record[slot];
+      if (!fileObj || !fileObj.s3Key) continue;
+
+      const cleanKey = fileObj.s3Key.replace(/^\/+/, '');
+      const basename = fileObj.name || cleanKey.split(/[/\\]/).pop() || 'file';
+      const mimeType = guessMimeType(basename);
+
+      try {
+        const presignedUrl = await getSignedUrl(
+          s3,
+          new GetObjectCommand({
+            Bucket: bucket,
+            Key: cleanKey,
+            ResponseContentDisposition: `inline; filename="${encodeURIComponent(basename)}"`,
+            ResponseContentType: mimeType,
+          }),
+          { expiresIn: expiresSeconds },
+        );
+        fileObj.s3Url = presignedUrl;
+        presignedCount++;
+      } catch (err: any) {
+        console.warn(`Presigning failed for ${cleanKey}, using clean URL:`, err.message);
+        fileObj.s3Url = `https://${bucket}.s3.amazonaws.com/${cleanKey}`;
+      }
+    }
+  }
+
+  return {
+    success: true,
+    records,
+    presignedCount,
+    message: `Generated real presigned URLs for ${presignedCount} file links (expires in ${presignDays} days).`,
+  };
+}
+
+

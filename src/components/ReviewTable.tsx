@@ -13,6 +13,7 @@ import {
   Copy,
   Check,
   UploadCloud,
+  KeyRound,
 } from 'lucide-react';
 import { NoteRecord, DETAIL_COLUMNS } from '../types';
 
@@ -23,6 +24,8 @@ interface ReviewTableProps {
   onDownloadExcel: () => void;
   onUploadToS3?: () => Promise<void>;
   isUploadingS3?: boolean;
+  onPresignRecords?: () => Promise<void>;
+  isPresigning?: boolean;
   s3WorkbookUrl?: string | null;
   s3Bucket?: string;
   s3Prefix?: string;
@@ -35,6 +38,8 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
   onDownloadExcel,
   onUploadToS3,
   isUploadingS3 = false,
+  onPresignRecords,
+  isPresigning = false,
   s3WorkbookUrl = null,
   s3Bucket = 'int-shaip-bucket',
   s3Prefix = 'interns-test-data/SEP8/',
@@ -149,6 +154,20 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                 </option>
               ))}
             </select>
+          )}
+
+          {/* Re-Sign S3 URLs action button */}
+          {onPresignRecords && records.length > 0 && (
+            <button
+              type="button"
+              onClick={onPresignRecords}
+              disabled={isPresigning}
+              title="Generate fresh 7-day authentic presigned URLs for all note files"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <KeyRound className={`w-3.5 h-3.5 text-indigo-600 ${isPresigning ? 'animate-spin' : ''}`} />
+              <span>{isPresigning ? 'Signing URLs...' : 'Sign 7-Day S3 URLs'}</span>
+            </button>
           )}
 
           {/* Upload to S3 action button */}
