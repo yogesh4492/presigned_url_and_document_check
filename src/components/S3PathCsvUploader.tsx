@@ -267,7 +267,7 @@ export const S3PathCsvUploader: React.FC<S3PathCsvUploaderProps> = ({
             </div>
             <p className="text-sm text-slate-500 mt-1">
               Upload or paste a CSV file containing an <code className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-800 font-mono text-xs">s3path</code> header.
-              All existing columns are preserved and enriched with 7-day inline-openable presigned URLs.
+              All existing columns are preserved and enriched with clean <strong>Short URLs (filename hyperlinks)</strong> alongside full 7-day presigned URLs.
             </p>
           </div>
 
@@ -484,8 +484,11 @@ export const S3PathCsvUploader: React.FC<S3PathCsvUploaderProps> = ({
                       {h}
                     </th>
                   ))}
+                  <th className="py-2.5 px-3 font-semibold whitespace-nowrap bg-indigo-950 text-indigo-200 border-x border-indigo-800/60">
+                    Short URL (File Name Hyperlink)
+                  </th>
                   <th className="py-2.5 px-3 font-semibold whitespace-nowrap">
-                    7-Day Presigned URL (Inline On-Click)
+                    7-Day Presigned URL (Full Link)
                   </th>
                   <th className="py-2.5 px-3 font-semibold text-center w-24">Status</th>
                   <th className="py-2.5 px-3 font-semibold text-center w-28">Actions</th>
@@ -500,17 +503,49 @@ export const S3PathCsvUploader: React.FC<S3PathCsvUploaderProps> = ({
                         {item.originalRow[h] || item.originalRow[h.toLowerCase()] || '-'}
                       </td>
                     ))}
+                    {/* Short URL (File Name Hyperlink) */}
+                    <td className="py-2 px-3 whitespace-nowrap border-x border-indigo-100/60 bg-indigo-50/30">
+                      {item.success && item.presignedUrl ? (
+                        <div className="flex items-center gap-1.5 max-w-[280px]">
+                          <a
+                            href={item.presignedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono text-indigo-600 hover:text-indigo-900 font-bold hover:underline inline-flex items-center gap-1 text-[11px] truncate"
+                            title={`Click to open inline in browser: ${item.fileName}`}
+                          >
+                            <span className="truncate">{item.fileName || 'Open File'}</span>
+                            <ExternalLink className="w-3 h-3 shrink-0 text-indigo-500" />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyUrl(item.presignedUrl, idx)}
+                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-100 rounded transition-colors shrink-0"
+                            title="Copy link"
+                          >
+                            {copiedIndex === idx ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs font-mono">{item.fileName || '-'}</span>
+                      )}
+                    </td>
+                    {/* Full Presigned URL */}
                     <td className="py-2 px-3 max-w-xs truncate">
                       {item.success && item.presignedUrl ? (
                         <a
                           href={item.presignedUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="font-mono text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-1 text-[11px]"
+                          className="font-mono text-slate-600 hover:text-indigo-700 hover:underline inline-flex items-center gap-1 text-[11px]"
                           title="Click to open file inline in browser"
                         >
-                          <span className="truncate max-w-[260px]">{item.presignedUrl}</span>
-                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          <span className="truncate max-w-[240px]">{item.presignedUrl}</span>
+                          <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" />
                         </a>
                       ) : (
                         <span className="text-red-500 text-xs font-mono">{item.error || 'Failed'}</span>

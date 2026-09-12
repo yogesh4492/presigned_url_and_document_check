@@ -301,10 +301,11 @@ export async function generateS3PathCsvExcelReport(
     right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
   };
 
-  // Columns: all original CSV headers + presigned_url_7days + file_name + mime_type + status
+  // Columns: all original CSV headers + short_url_filename + presigned_url_7days + mime_type + status
   const finalHeaders = [
     ...headersList,
-    'presigned_url_7days (Click to Open)',
+    'short_url_filename (Click to Open)',
+    'presigned_url_7days (Full Link)',
     'mime_type',
     'presigned_status',
   ];
@@ -332,8 +333,13 @@ export async function generateS3PathCsvExcelReport(
   // Data rows
   items.forEach((item) => {
     const rowValues = headersList.map((h) => item.originalRow[h] ?? item.originalRow[h.toLowerCase()] ?? '');
+    // Col headersList.length + 1: short_url_filename display text
+    rowValues.push(item.fileName || (item.error || 'Failed to generate'));
+    // Col headersList.length + 2: full presigned URL
     rowValues.push(item.presignedUrl || (item.error || 'Failed to generate'));
+    // Col headersList.length + 3: mimeType
     rowValues.push(item.mimeType);
+    // Col headersList.length + 4: status
     rowValues.push(item.success ? 'Active (7 Days)' : (item.error || 'Error'));
 
     const row = worksheet.addRow(rowValues);
@@ -344,10 +350,28 @@ export async function generateS3PathCsvExcelReport(
       cell.font = { name: 'Calibri', size: 9 };
     });
 
-    // Make the presigned_url cell a clickable link
-    const urlColIndex = headersList.length + 1;
+    const shortUrlColIndex = headersList.length + 1;
+    const fullUrlColIndex = headersList.length + 2;
+    const statusColIndex = headersList.length + 4;
+
     if (item.success && item.presignedUrl) {
-      const urlCell = row.getCell(urlColIndex);
+      // 1. Short filename URL cell: displays ONLY the clean filename, clicking opens the full presigned link!
+      const shortUrlCell = row.getCell(shortUrlColIndex);
+      shortUrlCell.value = {
+        text: item.fileName || 'Open File',
+        hyperlink: item.presignedUrl,
+        tooltip: `Click to open ${item.fileName} inline in browser (7-day validity)`,
+      };
+      shortUrlCell.font = {
+        name: 'Calibri',
+        size: 9,
+        color: { argb: 'FF4F46E5' }, // Indigo 600
+        underline: true,
+        bold: true,
+      };
+
+      // 2. Full presigned URL cell: also clickable
+      const urlCell = row.getCell(fullUrlColIndex);
       urlCell.value = {
         text: item.presignedUrl,
         hyperlink: item.presignedUrl,
@@ -360,7 +384,7 @@ export async function generateS3PathCsvExcelReport(
         underline: true,
       };
 
-      const statusCell = row.getCell(headersList.length + 3);
+      const statusCell = row.getCell(statusColIndex);
       statusCell.fill = {
         type: 'pattern',
         pattern: 'solid',
@@ -374,16 +398,17 @@ export async function generateS3PathCsvExcelReport(
   headersList.forEach((_, idx) => {
     worksheet.getColumn(idx + 1).width = 24;
   });
-  worksheet.getColumn(headersList.length + 1).width = 65; // Presigned URL
-  worksheet.getColumn(headersList.length + 2).width = 20; // Mime type
-  worksheet.getColumn(headersList.length + 3).width = 20; // Status
+  worksheet.getColumn(headersList.length + 1).width = 38; // Short URL (File Name)
+  worksheet.getColumn(headersList.length + 2).width = 65; // Presigned URL (Full)
+  worksheet.getColumn(headersList.length + 3).width = 20; // Mime type
+  worksheet.getColumn(headersList.length + 4).width = 20; // Status
 
   const buffer = await workbook.xlsx.writeBuffer();
   return new Uint8Array(buffer);
 }
 
 /**
- * Generates an RFC 4180 CSV preserving original CSV columns + presigned_url_7days
+ * Generates an RFC 4180 CSV preserving original CSV columns + short_url_filename + presigned_url_7days
  */
 export function generateS3PathCsvTextReport(
   items: S3PathPresignItem[],
@@ -397,6 +422,7 @@ export function generateS3PathCsvTextReport(
 
   const finalHeaders = [
     ...headersList,
+    'short_url_filename',
     'presigned_url_7days',
     'mime_type',
     'presigned_status',
@@ -407,6 +433,15 @@ export function generateS3PathCsvTextReport(
 
   items.forEach((item) => {
     const rowValues = headersList.map((h) => item.originalRow[h] ?? item.originalRow[h.toLowerCase()] ?? '');
+
+    // Short URL cell: Hyperlink formula in CSV for Excel / Google Sheets
+    if (item.success && item.presignedUrl) {
+      const escapedFileName = (item.fileName || 'file').replace(/"/g, '""');
+      rowValues.push(`=HYPERLINK("${item.presignedUrl}","${escapedFileName}")`);
+    } else {
+      rowValues.push(item.fileName || '');
+    }
+
     rowValues.push(item.presignedUrl || '');
     rowValues.push(item.mimeType);
     rowValues.push(item.success ? 'Active (7 Days)' : (item.error || 'Failed'));
